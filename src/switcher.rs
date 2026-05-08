@@ -1,72 +1,61 @@
-//! High-level account operations: add/remove/list/switch.
-//!
-//! On switch, writes credentials to **all** detected install locations
-//! (Windows native + each WSL distro) so every Claude Code on the host picks
-//! up the new account on next start. User must restart Claude Code processes
-//! manually — this tool does not hot-reload.
+//! High-level account operations across all install locations.
 
+use crate::account::Account;
+use crate::login::replicate_credentials_to_locations;
+use crate::oauth;
 use crate::platform::Location;
 use crate::store::Store;
 use anyhow::Result;
+use tracing::warn;
 
-pub async fn add_account(_slot: Option<u32>) -> Result<()> {
-    // TODO: read current `.credentials.json` from each location, dedupe via
-    // refresh_token, prompt user to log in if nothing found, save to store.
-    println!("add_account: not implemented");
-    Ok(())
+/// Make `slot` the active account, writing its credentials to every
+/// detected location. Refreshes the access token first if it's expired or
+/// near expiry.
+pub async fn switch_to(slot: u32, locations: &[Location]) -> Result<Account> {
+    let store = Store::open()?;
+    let account = store
+        .account(slot)?
+        .ok_or_else(|| anyhow::anyhow!("no account in slot {slot}"))?;
+    let mut creds = store.load_credentials(slot)?;
+
+    if oauth::is_expired(&creds) {
+        match oauth::refresh(&creds).await {
+            Ok(fresh) => {
+                store.save_account(&account, &fresh)?;
+                creds = fresh;
+            }
+            Err(e) => warn!(slot, error = ?e, "refresh failed; writing stale token"),
+        }
+    }
+
+    let results = replicate_credentials_to_locations(&creds, locations).await;
+    for (loc, res) in &results {
+        if let Err(e) = res {
+            warn!(location = %loc, error = ?e, "credential write failed");
+        }
+    }
+    store.set_active_slot(slot)?;
+    Ok(account)
 }
 
-pub async fn list_accounts() -> Result<()> {
+/// Round-robin to the next account after the active one.
+pub async fn switch_next(locations: &[Location]) -> Result<Account> {
     let store = Store::open()?;
     let accounts = store.list()?;
-    let active = store.active_slot()?;
     if accounts.is_empty() {
-        println!("(no accounts) — log into Claude Code, then run `claude-swap-tray add`");
-        return Ok(());
+        anyhow::bail!("no accounts to switch to");
     }
-    for acct in accounts {
-        let marker = if Some(acct.slot) == active { "*" } else { " " };
-        println!("{marker} [{}] {}", acct.slot, acct.display_tag());
-    }
-    Ok(())
-}
-
-pub async fn status() -> Result<()> {
-    let store = Store::open()?;
     let active = store.active_slot()?;
-    println!("active slot: {active:?}");
-    let locations = crate::platform::discover_locations().await?;
-    println!("locations:");
-    for loc in &locations {
-        println!("  - {loc}");
-    }
-    Ok(())
+    let next_slot = match active {
+        None => accounts[0].slot,
+        Some(curr) => {
+            let idx = accounts.iter().position(|a| a.slot == curr).unwrap_or(0);
+            accounts[(idx + 1) % accounts.len()].slot
+        }
+    };
+    switch_to(next_slot, locations).await
 }
 
-pub async fn switch_next() -> Result<()> {
-    println!("switch_next: not implemented");
-    Ok(())
-}
-
-pub async fn switch_to(_identifier: &str) -> Result<()> {
-    println!("switch_to: not implemented");
-    Ok(())
-}
-
-pub async fn remove_account(_identifier: &str) -> Result<()> {
-    println!("remove_account: not implemented");
-    Ok(())
-}
-
-/// Write the given account's credentials into every install location.
-#[allow(dead_code)]
-pub async fn apply_credentials_to_all(
-    _creds: &crate::account::OAuthCredentials,
-    locations: &[Location],
-) -> Result<()> {
-    for _loc in locations {
-        // TODO: serialize OAuth creds in claude-code's expected JSON shape,
-        // write to loc.credentials_path() atomically.
-    }
-    Ok(())
+pub async fn remove(slot: u32) -> Result<()> {
+    Store::open()?.delete_account(slot)
 }

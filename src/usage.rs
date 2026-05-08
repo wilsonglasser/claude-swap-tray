@@ -1,9 +1,11 @@
 //! Anthropic usage API client.
 //!
-//! Endpoint: `GET https://api.anthropic.com/api/oauth/usage` with the OAuth
-//! access token in `Authorization: Bearer ...`. Returns 5h + 7d windows with
-//! used/limit and reset timestamps.
+//! `GET https://api.anthropic.com/api/oauth/usage` with bearer access token.
+//! Response carries 5-hour and 7-day windows with used/limit + reset time.
+//! Field shape is undocumented; we deserialize loosely and tolerate missing
+//! windows.
 
+use crate::account::OAuthCredentials;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -15,17 +17,16 @@ pub struct UsageWindow {
     pub pct: f64,
     pub used: u64,
     pub limit: u64,
-    pub resets_at: DateTime<Utc>,
+    pub resets_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UsageReport {
     pub five_hour: Option<UsageWindow>,
     pub seven_day: Option<UsageWindow>,
 }
 
 impl UsageReport {
-    /// Return the highest usage % across all windows, used for threshold checks.
     pub fn worst_pct(&self) -> f64 {
         let h5 = self.five_hour.as_ref().map(|w| w.pct).unwrap_or(0.0);
         let d7 = self.seven_day.as_ref().map(|w| w.pct).unwrap_or(0.0);
@@ -33,25 +34,59 @@ impl UsageReport {
     }
 }
 
-pub async fn fetch(access_token: &str) -> Result<UsageReport> {
-    let client = reqwest::Client::new();
+pub async fn fetch(creds: &OAuthCredentials) -> Result<UsageReport> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()?;
     let resp = client
         .get(USAGE_URL)
-        .bearer_auth(access_token)
+        .bearer_auth(&creds.access_token)
         .send()
         .await
         .context("usage api request failed")?;
     let status = resp.status();
     if !status.is_success() {
-        anyhow::bail!("usage api returned {status}");
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("usage api returned {status}: {text}");
     }
     let raw: serde_json::Value = resp.json().await.context("usage api json parse failed")?;
-    parse(raw)
+    Ok(parse(&raw))
 }
 
-fn parse(raw: serde_json::Value) -> Result<UsageReport> {
-    // TODO: shape may differ per response; verify against real fixture and
-    // implement strict deserialization.
-    let _ = raw;
-    Ok(UsageReport { five_hour: None, seven_day: None })
+/// Parse the usage payload. The endpoint shape varies; we look for any
+/// nested object with `used`/`limit`/`resets_at` keys under common
+/// container names (`five_hour_window`, `5h`, `seven_day_window`, `7d`).
+fn parse(raw: &serde_json::Value) -> UsageReport {
+    UsageReport {
+        five_hour: extract_window(raw, &["five_hour", "five_hour_window", "5h", "fiveHour"]),
+        seven_day: extract_window(raw, &["seven_day", "seven_day_window", "7d", "sevenDay"]),
+    }
+}
+
+fn extract_window(root: &serde_json::Value, keys: &[&str]) -> Option<UsageWindow> {
+    for k in keys {
+        if let Some(obj) = root.get(*k) {
+            if let Some(w) = window_from_obj(obj) {
+                return Some(w);
+            }
+        }
+    }
+    None
+}
+
+fn window_from_obj(obj: &serde_json::Value) -> Option<UsageWindow> {
+    let used = obj.get("used").or_else(|| obj.get("utilization_used"))?.as_u64()?;
+    let limit = obj.get("limit").or_else(|| obj.get("utilization_limit"))?.as_u64()?;
+    if limit == 0 {
+        return None;
+    }
+    let pct = (used as f64 / limit as f64) * 100.0;
+    let resets_at = obj
+        .get("resets_at")
+        .or_else(|| obj.get("reset_at"))
+        .or_else(|| obj.get("resetsAt"))
+        .and_then(|v| v.as_str())
+        .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+        .map(|d| d.with_timezone(&Utc));
+    Some(UsageWindow { pct, used, limit, resets_at })
 }

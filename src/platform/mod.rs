@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[cfg(target_os = "windows")]
 mod windows;
@@ -11,19 +11,50 @@ mod wsl;
 
 #[derive(Debug, Clone)]
 pub enum Location {
-    /// Native Windows install — `C:\Users\<user>\.claude\`.
-    Windows { config_dir: PathBuf },
-    /// A WSL distro — `\\wsl$\<distro>\home\<user>\.claude\`.
-    Wsl { distro: String, config_dir: PathBuf },
+    /// Native Windows install.
+    Windows {
+        /// Where `.credentials.json` lives — typically `%USERPROFILE%\.claude\`.
+        config_dir: PathBuf,
+        /// Home dir — `%USERPROFILE%`. `.claude.json` sits here.
+        home_dir: PathBuf,
+    },
+    /// A WSL distro. Paths are UNC paths on the Windows side
+    /// (`\\wsl$\<distro>\home\<user>\...`).
+    Wsl {
+        distro: String,
+        config_dir: PathBuf,
+        home_dir: PathBuf,
+    },
 }
 
 impl Location {
+    pub fn config_dir(&self) -> &Path {
+        match self {
+            Location::Windows { config_dir, .. } | Location::Wsl { config_dir, .. } => config_dir,
+        }
+    }
+
+    pub fn home_dir(&self) -> &Path {
+        match self {
+            Location::Windows { home_dir, .. } | Location::Wsl { home_dir, .. } => home_dir,
+        }
+    }
+
+    /// `.credentials.json` — sits inside `<config_dir>`.
     pub fn credentials_path(&self) -> PathBuf {
-        let dir = match self {
-            Location::Windows { config_dir } => config_dir,
-            Location::Wsl { config_dir, .. } => config_dir,
-        };
-        dir.join(".credentials.json")
+        self.config_dir().join(".credentials.json")
+    }
+
+    /// `.claude.json` (or legacy `<config_dir>/.config.json`) — holds
+    /// `oauthAccount` with email + organization metadata. Resolution:
+    /// legacy `<config_dir>/.config.json` if it exists, else
+    /// `<home_dir>/.claude.json`.
+    pub fn global_config_path(&self) -> PathBuf {
+        let legacy = self.config_dir().join(".config.json");
+        if legacy.exists() {
+            return legacy;
+        }
+        self.home_dir().join(".claude.json")
     }
 
     pub fn label(&self) -> String {
@@ -52,7 +83,5 @@ pub async fn discover_locations() -> Result<Vec<Location>> {
 
 #[cfg(not(target_os = "windows"))]
 pub async fn discover_locations() -> Result<Vec<Location>> {
-    // Non-Windows builds exist only for `cargo check` convenience.
-    // Discovery requires `\\wsl$\` UNC access which is Windows-only.
     Ok(Vec::new())
 }

@@ -1,13 +1,4 @@
 //! WSL distro discovery.
-//!
-//! Strategy:
-//! 1. Run `wsl -l -q` to enumerate distros (one name per line; UTF-16LE on
-//!    older Windows builds — needs decoding).
-//! 2. For each distro, resolve the Linux user via `wsl -d <name> -e whoami`.
-//! 3. Build UNC path `\\wsl$\<distro>\home\<user>\.claude` (or `.localhost`
-//!    on newer Windows).
-//! 4. Probe existence of the directory; skip distros where Claude Code is
-//!    not installed.
 
 use crate::platform::Location;
 use anyhow::Result;
@@ -19,9 +10,14 @@ pub async fn discover() -> Result<Vec<Location>> {
     let mut out = Vec::new();
     for distro in distros {
         if let Some(user) = wsl_user(&distro).await {
-            let unc = PathBuf::from(format!(r"\\wsl$\{distro}\home\{user}\.claude"));
-            if unc.exists() {
-                out.push(Location::Wsl { distro, config_dir: unc });
+            let home = PathBuf::from(format!(r"\\wsl$\{distro}\home\{user}"));
+            let config_dir = home.join(".claude");
+            if config_dir.exists() || home.join(".claude.json").exists() {
+                out.push(Location::Wsl {
+                    distro,
+                    config_dir,
+                    home_dir: home,
+                });
             }
         }
     }
@@ -33,7 +29,6 @@ async fn list_distros() -> Result<Vec<String>> {
     if !output.status.success() {
         return Ok(Vec::new());
     }
-    // Older `wsl.exe` emits UTF-16LE; newer ones honor `WSL_UTF8=1`.
     let raw = decode_wsl_output(&output.stdout);
     Ok(raw
         .lines()
