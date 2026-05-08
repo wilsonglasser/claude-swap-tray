@@ -17,6 +17,9 @@ pub enum Message {
     LocationsRefreshed(Vec<Location>),
     /// Account list refreshed.
     AccountsRefreshed(Vec<Account>),
+    /// Background usage monitor produced an event.
+    #[cfg(target_os = "windows")]
+    MonitorEvent(crate::monitor::MonitorEvent),
 
     // Add-account screen.
     AddAccount(add_account::Msg),
@@ -31,6 +34,7 @@ pub struct App {
     pub accounts: Vec<Account>,
     pub locations: Vec<Location>,
     pub active_slot: Option<u32>,
+    pub usage_pct: Option<f64>,
     pub add_state: add_account::State,
     pub settings_state: settings::State,
 }
@@ -42,12 +46,18 @@ impl App {
             accounts: Vec::new(),
             locations: Vec::new(),
             active_slot: None,
+            usage_pct: None,
             add_state: add_account::State::default(),
             settings_state: settings::State::default(),
         };
         let bootstrap = Task::batch(vec![
             Task::perform(load_locations(), Message::LocationsRefreshed),
             Task::perform(load_accounts(), Message::AccountsRefreshed),
+            Task::perform(load_active_slot(), |slot| {
+                Message::Accounts(accounts::Msg::SwitchCompleted(
+                    slot.ok_or_else(|| "no active account".to_string()),
+                ))
+            }),
         ]);
         (app, bootstrap)
     }
@@ -74,6 +84,8 @@ impl App {
                 self.accounts = accts;
                 Task::none()
             }
+            #[cfg(target_os = "windows")]
+            Message::MonitorEvent(ev) => handle_monitor_event(self, ev),
             Message::AddAccount(msg) => add_account::update(self, msg),
             Message::Accounts(msg) => accounts::update(self, msg),
             Message::Settings(msg) => settings::update(self, msg),
@@ -85,12 +97,53 @@ impl App {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        time::every(Duration::from_secs(30)).map(|_| Message::Tick)
+        let mut subs: Vec<Subscription<Message>> =
+            vec![time::every(Duration::from_secs(30)).map(|_| Message::Tick)];
+        #[cfg(target_os = "windows")]
+        {
+            subs.push(monitor_subscription().map(Message::MonitorEvent));
+        }
+        Subscription::batch(subs)
     }
 
     fn theme(&self) -> Theme {
         Theme::Dark
     }
+}
+
+#[cfg(target_os = "windows")]
+fn handle_monitor_event(app: &mut App, ev: crate::monitor::MonitorEvent) -> Task<Message> {
+    use crate::monitor::MonitorEvent;
+    match ev {
+        MonitorEvent::ThresholdCrossed { slot, email, pct } => {
+            app.usage_pct = Some(pct);
+            let with_sound = app.settings_state.draft.notify_sound;
+            if let Err(e) = crate::notify::show_threshold_alert(slot, &email, pct, with_sound) {
+                tracing::warn!(error = ?e, "threshold toast failed");
+            }
+        }
+        MonitorEvent::UsageUpdated { pct, .. } => {
+            app.usage_pct = Some(pct);
+        }
+    }
+    Task::none()
+}
+
+#[cfg(target_os = "windows")]
+fn monitor_subscription() -> Subscription<crate::monitor::MonitorEvent> {
+    use iced::stream;
+    Subscription::run(|| {
+        stream::channel(16, |mut output| async move {
+            loop {
+                let settings = crate::config::Settings::load();
+                let mon = crate::monitor::Monitor::new(settings);
+                if let Some(ev) = mon.poll_once().await {
+                    let _ = iced::futures::SinkExt::send(&mut output, ev).await;
+                }
+                tokio::time::sleep(mon.poll_interval()).await;
+            }
+        })
+    })
 }
 
 pub fn run() -> Result<()> {
@@ -113,4 +166,8 @@ async fn load_accounts() -> Vec<Account> {
         Err(_) => return Vec::new(),
     };
     store.list().unwrap_or_default()
+}
+
+async fn load_active_slot() -> Option<u32> {
+    crate::store::Store::open().ok()?.active_slot().ok().flatten()
 }

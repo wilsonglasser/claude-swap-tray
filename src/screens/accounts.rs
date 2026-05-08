@@ -95,8 +95,13 @@ pub fn view(app: &App) -> Element<'_, Message> {
         .map(|a| account_row(a, active == Some(a.slot)))
         .collect();
 
+    let header = match app.usage_pct {
+        Some(pct) => format!("{} account(s) — active at {pct:.0}%", app.accounts.len()),
+        None => format!("{} account(s)", app.accounts.len()),
+    };
+
     column![
-        text(format!("{} account(s)", app.accounts.len())).size(22),
+        text(header).size(22),
         Space::new().height(12),
         column(rows).spacing(8),
         Space::new().height(20),
