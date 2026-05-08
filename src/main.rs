@@ -1,17 +1,14 @@
-//! claude-swap-tray entry point.
-//!
-//! Single-binary CLI + tray app. With no subcommand, launches the tray icon
-//! (Windows-only). Subcommands work headless on any host that can reach the
-//! credential locations.
+//! claude-swap-tray entry point — iced GUI app.
 
 use anyhow::Result;
-use clap::Parser;
 
 mod account;
-mod cli;
+mod app;
 mod config;
+mod login;
 mod oauth;
 mod platform;
+mod screens;
 mod store;
 mod switcher;
 mod usage;
@@ -25,11 +22,8 @@ mod tray;
 
 fn main() -> Result<()> {
     init_tracing();
-    let args = cli::Cli::parse();
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?;
-    runtime.block_on(cli::dispatch(args))
+    app::run()?;
+    Ok(())
 }
 
 fn init_tracing() {
