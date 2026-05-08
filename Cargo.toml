@@ -1,0 +1,51 @@
+[package]
+name = "claude-swap-tray"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Windows tray app to manage multiple Claude Code accounts across Windows + WSL distros from a single host"
+license = "MIT"
+repository = "https://github.com/wilsonglasser/claude-swap-tray"
+readme = "README.md"
+keywords = ["claude", "claude-code", "tray", "windows", "wsl"]
+categories = ["command-line-utilities", "gui"]
+
+[[bin]]
+name = "claude-swap-tray"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "signal", "fs", "process", "sync"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+chrono = { version = "0.4", features = ["serde"] }
+directories = "6"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+tray-icon = "0.24"
+tao = "0.35"
+tauri-winrt-notification = "0.7"
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
+single-instance = "0.3"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
+mockito = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
