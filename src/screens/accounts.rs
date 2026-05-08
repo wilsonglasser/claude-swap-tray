@@ -1,7 +1,10 @@
-//! Accounts screen — list managed accounts with usage info, switch button.
+//! Accounts screen — list managed accounts, switch active, remove.
 
+use crate::account::Account;
 use crate::app::{App, Message};
+use crate::platform::Location;
 use crate::screens::Screen;
+use crate::switcher;
 use iced::widget::{Space, button, column, container, row, text};
 use iced::{Element, Length, Task};
 
@@ -9,22 +12,57 @@ use iced::{Element, Length, Task};
 pub enum Msg {
     SwitchTo(u32),
     Remove(u32),
-    SwitchCompleted(Result<(), String>),
+    SwitchCompleted(Result<u32, String>),
+    RemoveCompleted(Result<u32, String>),
 }
 
-#[allow(unused_variables)]
 pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
     match msg {
         Msg::SwitchTo(slot) => {
-            // TODO: dispatch async switcher::switch_to and refresh on completion
+            let locations = app.locations.clone();
+            Task::perform(
+                async move {
+                    switcher::switch_to(slot, &locations)
+                        .await
+                        .map(|_| slot)
+                        .map_err(|e| e.to_string())
+                },
+                |res| Message::Accounts(Msg::SwitchCompleted(res)),
+            )
+        }
+        Msg::Remove(slot) => Task::perform(
+            async move {
+                switcher::remove(slot)
+                    .await
+                    .map(|_| slot)
+                    .map_err(|e| e.to_string())
+            },
+            |res| Message::Accounts(Msg::RemoveCompleted(res)),
+        ),
+        Msg::SwitchCompleted(Ok(slot)) => {
+            app.active_slot = Some(slot);
+            Task::perform(reload_accounts(), Message::AccountsRefreshed)
+        }
+        Msg::SwitchCompleted(Err(e)) => {
+            tracing::warn!(error = %e, "switch failed");
             Task::none()
         }
-        Msg::Remove(_slot) => {
-            // TODO: dispatch async removal
+        Msg::RemoveCompleted(Ok(_)) => {
+            Task::perform(reload_accounts(), Message::AccountsRefreshed)
+        }
+        Msg::RemoveCompleted(Err(e)) => {
+            tracing::warn!(error = %e, "remove failed");
             Task::none()
         }
-        Msg::SwitchCompleted(_) => Task::none(),
     }
+}
+
+async fn reload_accounts() -> Vec<Account> {
+    let store = match crate::store::Store::open() {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+    store.list().unwrap_or_default()
 }
 
 pub fn view(app: &App) -> Element<'_, Message> {
@@ -62,33 +100,37 @@ pub fn view(app: &App) -> Element<'_, Message> {
         Space::new().height(12),
         column(rows).spacing(8),
         Space::new().height(20),
-        text(format!("{} location(s) detected", app.locations.len()))
-            .size(13)
-            .style(|t: &iced::Theme| text::Style {
-                color: Some(t.extended_palette().background.weak.color),
-            }),
+        locations_summary(&app.locations),
     ]
     .into()
 }
 
-fn account_row(acct: &crate::account::Account, is_active: bool) -> Element<'_, Message> {
+fn account_row(acct: &Account, is_active: bool) -> Element<'_, Message> {
     let marker = if is_active { "●" } else { " " };
     container(
         row![
             text(marker).size(20),
             column![
                 text(acct.email.clone()).size(15),
-                text(acct.organization_name.clone())
-                    .size(12)
-                    .style(|t: &iced::Theme| text::Style {
-                        color: Some(t.extended_palette().background.weak.color),
-                    }),
+                text(if acct.organization_name.is_empty() {
+                    "personal".to_string()
+                } else {
+                    acct.organization_name.clone()
+                })
+                .size(12)
+                .style(|t: &iced::Theme| text::Style {
+                    color: Some(t.extended_palette().background.weak.color),
+                }),
             ]
             .spacing(2),
             Space::new().width(Length::Fill),
-            button(text("Switch"))
+            button(text(if is_active { "Active" } else { "Switch" }))
                 .on_press(Message::Accounts(Msg::SwitchTo(acct.slot)))
-                .style(button::primary),
+                .style(if is_active {
+                    button::success
+                } else {
+                    button::primary
+                }),
             button(text("Remove"))
                 .on_press(Message::Accounts(Msg::Remove(acct.slot)))
                 .style(button::danger),
@@ -99,4 +141,26 @@ fn account_row(acct: &crate::account::Account, is_active: bool) -> Element<'_, M
     )
     .style(container::bordered_box)
     .into()
+}
+
+fn locations_summary(locations: &[Location]) -> Element<'_, Message> {
+    if locations.is_empty() {
+        return text("No Claude Code installations detected.")
+            .size(13)
+            .style(|t: &iced::Theme| text::Style {
+                color: Some(t.extended_palette().danger.weak.color),
+            })
+            .into();
+    }
+    let labels: String = locations
+        .iter()
+        .map(|l| l.label())
+        .collect::<Vec<_>>()
+        .join(", ");
+    text(format!("{} location(s): {labels}", locations.len()))
+        .size(13)
+        .style(|t: &iced::Theme| text::Style {
+            color: Some(t.extended_palette().background.weak.color),
+        })
+        .into()
 }
