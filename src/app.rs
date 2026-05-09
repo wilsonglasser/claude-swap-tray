@@ -13,6 +13,8 @@ pub enum Message {
     NavigateTo(Screen),
     /// Periodic refresh tick.
     Tick,
+    /// Initial bootstrap delivered locations + imported accounts + active slot.
+    Bootstrapped(Vec<Location>, Vec<Account>, Option<u32>),
     /// Locations re-discovered.
     LocationsRefreshed(Vec<Location>),
     /// Account list refreshed.
@@ -52,10 +54,9 @@ impl App {
             add_state: add_account::State::default(),
             settings_state: settings::State::default(),
         };
-        let bootstrap = Task::batch(vec![
-            Task::perform(load_locations(), Message::LocationsRefreshed),
-            Task::perform(load_accounts(), Message::AccountsRefreshed),
-        ]);
+        let bootstrap = Task::perform(boot(), |(locs, accts, active)| {
+            Message::Bootstrapped(locs, accts, active)
+        });
         (app, bootstrap)
     }
 
@@ -73,6 +74,12 @@ impl App {
                 Task::perform(load_locations(), Message::LocationsRefreshed),
                 Task::perform(load_accounts(), Message::AccountsRefreshed),
             ]),
+            Message::Bootstrapped(locs, accts, active) => {
+                self.locations = locs;
+                self.accounts = accts;
+                self.active_slot = active;
+                Task::none()
+            }
             Message::LocationsRefreshed(locs) => {
                 self.locations = locs;
                 Task::none()
@@ -199,4 +206,20 @@ async fn load_accounts() -> Vec<Account> {
         Err(_) => return Vec::new(),
     };
     store.list().unwrap_or_default()
+}
+
+/// Single-shot startup task: discover locations, auto-import any
+/// already-logged-in accounts, then return the populated state.
+async fn boot() -> (Vec<Location>, Vec<Account>, Option<u32>) {
+    let locations = crate::platform::discover_locations()
+        .await
+        .unwrap_or_default();
+    if let Err(e) = crate::login::discover_and_import(&locations).await {
+        tracing::warn!(error = ?e, "auto-import failed");
+    }
+    let accounts = load_accounts().await;
+    let active = crate::store::Store::open()
+        .ok()
+        .and_then(|s| s.active_slot().ok().flatten());
+    (locations, accounts, active)
 }

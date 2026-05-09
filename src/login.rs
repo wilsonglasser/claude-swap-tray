@@ -11,9 +11,11 @@ use crate::platform::Location;
 use crate::store::Store;
 use anyhow::{Context, Result};
 use chrono::Utc;
+use std::collections::HashSet;
 use std::path::Path;
 use std::time::{Duration, Instant};
 use tokio::process::Command;
+use tracing::{info, warn};
 
 const LOGIN_TIMEOUT_SECS: u64 = 300;
 const POLL_INTERVAL_MS: u64 = 500;
@@ -24,6 +26,74 @@ const POLL_INTERVAL_MS: u64 = 500;
 pub struct AddOutcome {
     pub account: Account,
     pub replications: Vec<(String, Result<()>)>,
+}
+
+/// Scan every detected `Location` for an existing logged-in account and
+/// import it into our store on first run. Dedupes by (email,
+/// organization_uuid). Returns the list of accounts newly added.
+///
+/// Idempotent — accounts already in the manifest are skipped.
+pub async fn discover_and_import(locations: &[Location]) -> Result<Vec<Account>> {
+    let store = Store::open()?;
+    let existing = store.list()?;
+    let mut seen: HashSet<(String, String)> = existing
+        .iter()
+        .map(|a| (a.email.clone(), a.organization_uuid.clone()))
+        .collect();
+
+    let mut imported = Vec::new();
+    for loc in locations {
+        match scan_location(loc).await {
+            Ok(Some((meta, creds))) => {
+                let key = (meta.email_address.clone(), meta.organization_uuid.clone());
+                if seen.contains(&key) {
+                    info!(location = %loc.label(), email = %meta.email_address, "already imported, skipping");
+                    continue;
+                }
+                seen.insert(key);
+                let slot = store.next_slot()?;
+                let account = Account {
+                    slot,
+                    email: meta.email_address.clone(),
+                    uuid: meta.account_uuid,
+                    organization_uuid: meta.organization_uuid,
+                    organization_name: meta.organization_name,
+                    added_at: Utc::now(),
+                };
+                store.save_account(&account, &creds)?;
+                info!(slot, email = %meta.email_address, "imported existing account");
+                imported.push(account);
+            }
+            Ok(None) => {}
+            Err(e) => warn!(location = %loc.label(), error = ?e, "scan failed; skipping"),
+        }
+    }
+    Ok(imported)
+}
+
+async fn scan_location(
+    loc: &Location,
+) -> Result<Option<(crate::account::OAuthAccount, OAuthCredentials)>> {
+    let creds_path = loc.credentials_path();
+    if !creds_path.exists() {
+        return Ok(None);
+    }
+    let creds_bytes = tokio::fs::read(&creds_path).await?;
+    let creds: OAuthCredentials = match parse_oauth_credentials(&creds_bytes) {
+        Ok(c) => c,
+        Err(e) => {
+            warn!(path = %creds_path.display(), error = ?e, "skip: bad credentials JSON");
+            return Ok(None);
+        }
+    };
+    let meta = match read_account_metadata(loc).await {
+        Ok(m) => m,
+        Err(_) => return Ok(None),
+    };
+    if meta.email_address.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some((meta, creds)))
 }
 
 /// Run `claude login` on the Windows install, capture the new credentials,
