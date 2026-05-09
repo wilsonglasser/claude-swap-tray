@@ -17,21 +17,24 @@ Inspired by [realiti4/claude-swap](https://github.com/realiti4/claude-swap), but
 
 One pool of accounts. One window. Switch in all locations or scope to one.
 
-## Features (target)
+## Features
 
 - [x] Project scaffold (Rust 2024, iced 0.14, Windows-only)
 - [x] Location discovery (Windows native + WSL distros via `wsl -l -q`)
 - [x] iced GUI shell — Accounts / Add account / Settings screens
-- [ ] Account model + persistence (Windows Credential Manager + JSON manifest)
-- [ ] OAuth token decode + refresh
-- [ ] `.credentials.json` parser (capture email/org from claude-code's payload)
-- [ ] Add-account flow: spawn `claude login` (or `wsl -d <distro> -e claude login`), watch credentials file, ingest
-- [ ] Replicate credentials across all locations on switch
-- [ ] Anthropic usage API client + per-account usage display
-- [ ] Background monitor: poll usage, alert on threshold
-- [ ] Native Windows toast with action buttons + sound
-- [ ] System tray (window minimizes to tray, monitor keeps running)
-- [ ] Settings persistence (threshold, poll interval, sound, auto-rotate)
+- [x] Account model + persistence (Windows Credential Manager + JSON manifest)
+- [x] OAuth token decode + refresh against `platform.claude.com/v1/oauth/token`
+- [x] `.credentials.json` parser with serde flatten for unknown fields (round-trip safe)
+- [x] Add-account flow: `claude login` runs on Windows, credentials auto-sync to all WSL distros
+- [x] Replicate credentials across all locations on switch (atomic writes via temp+rename)
+- [x] Anthropic usage API client + tolerant parser for varying response shapes
+- [x] Background monitor: poll usage, anti-spam (30 min suppression), threshold alert
+- [x] Native Windows toast (tauri-winrt-notification) with sound
+- [x] System tray with Show / Hide / Quit menu; window X minimizes to tray
+- [x] Settings persistence (threshold, poll interval, sound, auto-rotate)
+- [ ] Auto-rotate wired (setting exists, not yet acted on)
+- [ ] Per-account quick switch from tray menu
+- [ ] Designed `assets/icon.ico` (procedural orange disc placeholder for now)
 - [ ] MSIX/winget distribution
 
 ## Architecture
