@@ -22,6 +22,8 @@ mod tray;
 
 fn main() -> Result<()> {
     init_tracing();
+    #[cfg(target_os = "windows")]
+    tray::spawn();
     app::run()?;
     Ok(())
 }

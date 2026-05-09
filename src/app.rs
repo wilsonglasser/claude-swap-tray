@@ -4,7 +4,7 @@ use crate::account::Account;
 use crate::platform::Location;
 use crate::screens::{Screen, accounts, add_account, settings};
 use anyhow::Result;
-use iced::{Element, Subscription, Task, Theme, time};
+use iced::{Element, Subscription, Task, Theme, time, window};
 use std::time::Duration;
 
 #[derive(Debug, Clone)]
@@ -13,19 +13,21 @@ pub enum Message {
     NavigateTo(Screen),
     /// Periodic refresh tick.
     Tick,
-    /// Locations re-discovered (in case user installed new WSL distro).
+    /// Locations re-discovered.
     LocationsRefreshed(Vec<Location>),
     /// Account list refreshed.
     AccountsRefreshed(Vec<Account>),
+    /// User clicked the X on the window — hide instead of exit.
+    WindowCloseRequested(window::Id),
     /// Background usage monitor produced an event.
     #[cfg(target_os = "windows")]
     MonitorEvent(crate::monitor::MonitorEvent),
+    /// User picked something from the system tray menu.
+    #[cfg(target_os = "windows")]
+    TrayAction(crate::tray::TrayAction),
 
-    // Add-account screen.
     AddAccount(add_account::Msg),
-    // Accounts screen.
     Accounts(accounts::Msg),
-    // Settings screen.
     Settings(settings::Msg),
 }
 
@@ -53,11 +55,6 @@ impl App {
         let bootstrap = Task::batch(vec![
             Task::perform(load_locations(), Message::LocationsRefreshed),
             Task::perform(load_accounts(), Message::AccountsRefreshed),
-            Task::perform(load_active_slot(), |slot| {
-                Message::Accounts(accounts::Msg::SwitchCompleted(
-                    slot.ok_or_else(|| "no active account".to_string()),
-                ))
-            }),
         ]);
         (app, bootstrap)
     }
@@ -84,8 +81,11 @@ impl App {
                 self.accounts = accts;
                 Task::none()
             }
+            Message::WindowCloseRequested(id) => window::set_mode(id, window::Mode::Hidden),
             #[cfg(target_os = "windows")]
             Message::MonitorEvent(ev) => handle_monitor_event(self, ev),
+            #[cfg(target_os = "windows")]
+            Message::TrayAction(action) => handle_tray_action(action),
             Message::AddAccount(msg) => add_account::update(self, msg),
             Message::Accounts(msg) => accounts::update(self, msg),
             Message::Settings(msg) => settings::update(self, msg),
@@ -97,11 +97,14 @@ impl App {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        let mut subs: Vec<Subscription<Message>> =
-            vec![time::every(Duration::from_secs(30)).map(|_| Message::Tick)];
+        let mut subs: Vec<Subscription<Message>> = vec![
+            time::every(Duration::from_secs(30)).map(|_| Message::Tick),
+            window::close_requests().map(Message::WindowCloseRequested),
+        ];
         #[cfg(target_os = "windows")]
         {
             subs.push(monitor_subscription().map(Message::MonitorEvent));
+            subs.push(crate::tray::subscription());
         }
         Subscription::batch(subs)
     }
@@ -130,6 +133,25 @@ fn handle_monitor_event(app: &mut App, ev: crate::monitor::MonitorEvent) -> Task
 }
 
 #[cfg(target_os = "windows")]
+fn handle_tray_action(action: crate::tray::TrayAction) -> Task<Message> {
+    use crate::tray::TrayAction;
+    match action {
+        TrayAction::ShowWindow => window::oldest().then(|opt| match opt {
+            Some(id) => Task::batch(vec![
+                window::set_mode(id, window::Mode::Windowed),
+                window::gain_focus(id),
+            ]),
+            None => Task::none(),
+        }),
+        TrayAction::HideWindow => window::oldest().then(|opt| match opt {
+            Some(id) => window::set_mode(id, window::Mode::Hidden),
+            None => Task::none(),
+        }),
+        TrayAction::Quit => iced::exit(),
+    }
+}
+
+#[cfg(target_os = "windows")]
 fn monitor_subscription() -> Subscription<crate::monitor::MonitorEvent> {
     use iced::stream;
     Subscription::run(|| {
@@ -152,6 +174,7 @@ pub fn run() -> Result<()> {
         .subscription(App::subscription)
         .theme(App::theme)
         .window_size((900.0, 600.0))
+        .exit_on_close_request(false)
         .run()
         .map_err(|e| anyhow::anyhow!("iced runtime error: {e}"))
 }
@@ -166,8 +189,4 @@ async fn load_accounts() -> Vec<Account> {
         Err(_) => return Vec::new(),
     };
     store.list().unwrap_or_default()
-}
-
-async fn load_active_slot() -> Option<u32> {
-    crate::store::Store::open().ok()?.active_slot().ok().flatten()
 }
