@@ -98,9 +98,6 @@ fn wsl_command(args: &[&str]) -> Command {
     cmd
 }
 
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt as _;
-
 /// `wsl.exe` historically emits UTF-16LE without `WSL_UTF8=1`. We set that
 /// env var, so output is plain UTF-8. Keep the legacy decoder as a fallback
 /// in case an older Windows build ignores the env.
