@@ -11,7 +11,8 @@ use anyhow::{Context, Result};
 use tauri_winrt_notification::{Sound, Toast};
 use tracing::info;
 
-const APP_ID: &str = "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe";
+const APP_ID: &str =
+    "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe";
 
 pub fn show_threshold_alert(slot: u32, email: &str, pct: f64, with_sound: bool) -> Result<()> {
     info!(slot, email, pct, "showing threshold toast");

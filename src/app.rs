@@ -180,7 +180,9 @@ pub fn run() -> Result<()> {
 }
 
 async fn load_locations() -> Vec<Location> {
-    crate::platform::discover_locations().await.unwrap_or_default()
+    crate::platform::discover_locations()
+        .await
+        .unwrap_or_default()
 }
 
 async fn load_accounts() -> Vec<Account> {

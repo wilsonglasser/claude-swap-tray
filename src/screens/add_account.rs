@@ -50,9 +50,8 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
                 );
                 return Task::none();
             }
-            app.add_state.status = LoginStatus::Running(
-                "launching `claude login` on Windows…".to_string(),
-            );
+            app.add_state.status =
+                LoginStatus::Running("launching `claude login` on Windows…".to_string());
             let locations = app.locations.clone();
             Task::perform(
                 async move {
@@ -83,7 +82,9 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
 }
 
 fn has_windows_location(locations: &[Location]) -> bool {
-    locations.iter().any(|l| matches!(l, Location::Windows { .. }))
+    locations
+        .iter()
+        .any(|l| matches!(l, Location::Windows { .. }))
 }
 
 fn map_outcome(o: AddOutcome) -> AddOutcomeView {
@@ -179,7 +180,9 @@ fn location_summary(locations: &[Location]) -> Element<'_, Message> {
         .count();
 
     let win_line: Element<'_, Message> = if has_windows {
-        text("✓ Windows install detected (login source)").size(14).into()
+        text("✓ Windows install detected (login source)")
+            .size(14)
+            .into()
     } else {
         text("✗ No Windows install — install Claude Code on Windows first")
             .size(14)
@@ -190,17 +193,17 @@ fn location_summary(locations: &[Location]) -> Element<'_, Message> {
     };
 
     let wsl_line: Element<'_, Message> = match wsl_count {
-        0 => text("No WSL distros to sync (you can still add accounts).").size(14).into(),
-        n => text(format!("{n} WSL distro(s) will receive the credentials")).size(14).into(),
+        0 => text("No WSL distros to sync (you can still add accounts).")
+            .size(14)
+            .into(),
+        n => text(format!("{n} WSL distro(s) will receive the credentials"))
+            .size(14)
+            .into(),
     };
 
-    container(
-        column![win_line, wsl_line]
-            .spacing(4)
-            .padding(12),
-    )
-    .style(container::bordered_box)
-    .into()
+    container(column![win_line, wsl_line].spacing(4).padding(12))
+        .style(container::bordered_box)
+        .into()
 }
 
 fn success_widget(view: &AddOutcomeViewOk) -> Element<'_, Message> {

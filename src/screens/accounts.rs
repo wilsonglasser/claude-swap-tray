@@ -47,9 +47,7 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
             tracing::warn!(error = %e, "switch failed");
             Task::none()
         }
-        Msg::RemoveCompleted(Ok(_)) => {
-            Task::perform(reload_accounts(), Message::AccountsRefreshed)
-        }
+        Msg::RemoveCompleted(Ok(_)) => Task::perform(reload_accounts(), Message::AccountsRefreshed),
         Msg::RemoveCompleted(Err(e)) => {
             tracing::warn!(error = %e, "remove failed");
             Task::none()

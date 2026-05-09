@@ -23,7 +23,10 @@ pub struct State {
 
 impl Default for State {
     fn default() -> Self {
-        Self { draft: Settings::load(), last_save: None }
+        Self {
+            draft: Settings::load(),
+            last_save: None,
+        }
     }
 }
 
@@ -119,11 +122,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
     .into()
 }
 
-fn field<'a>(
-    label: &'a str,
-    help: &'a str,
-    control: Element<'a, Message>,
-) -> Element<'a, Message> {
+fn field<'a>(label: &'a str, help: &'a str, control: Element<'a, Message>) -> Element<'a, Message> {
     column![
         text(label).size(15),
         text(help).size(12).style(|t: &iced::Theme| text::Style {

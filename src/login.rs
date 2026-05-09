@@ -56,7 +56,10 @@ pub async fn add_account_and_sync(locations: Vec<Location>) -> Result<AddOutcome
         replications.push((label, res));
     }
 
-    Ok(AddOutcome { account, replications })
+    Ok(AddOutcome {
+        account,
+        replications,
+    })
 }
 
 async fn login_on_windows(location: &Location) -> Result<(Account, OAuthCredentials)> {
@@ -130,8 +133,7 @@ async fn read_account_metadata(location: &Location) -> Result<crate::account::OA
     let raw = tokio::fs::read(&path)
         .await
         .with_context(|| format!("read {}", path.display()))?;
-    let parsed: ClaudeGlobalConfig =
-        serde_json::from_slice(&raw).context("parse .claude.json")?;
+    let parsed: ClaudeGlobalConfig = serde_json::from_slice(&raw).context("parse .claude.json")?;
     Ok(parsed.oauth_account)
 }
 
@@ -151,7 +153,9 @@ pub async fn replicate_credentials_to_locations(
 }
 
 async fn write_credentials(creds: &OAuthCredentials, location: &Location) -> Result<()> {
-    let payload = CredentialsFile { claude_ai_oauth: creds.clone() };
+    let payload = CredentialsFile {
+        claude_ai_oauth: creds.clone(),
+    };
     let json = serde_json::to_vec_pretty(&payload)?;
     let target = location.credentials_path();
     if let Some(parent) = target.parent() {

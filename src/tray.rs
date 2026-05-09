@@ -57,12 +57,7 @@ fn run_tray_thread() -> Result<()> {
     let _ = SHOW_ID.set(show.id().0.clone());
     let _ = HIDE_ID.set(hide.id().0.clone());
     let _ = QUIT_ID.set(quit.id().0.clone());
-    menu.append_items(&[
-        &show,
-        &hide,
-        &PredefinedMenuItem::separator(),
-        &quit,
-    ])?;
+    menu.append_items(&[&show, &hide, &PredefinedMenuItem::separator(), &quit])?;
 
     let icon = build_default_icon();
     let _tray: TrayIcon = TrayIconBuilder::new()

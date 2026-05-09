@@ -67,7 +67,12 @@ impl Location {
 
 impl fmt::Display for Location {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} → {}", self.label(), self.credentials_path().display())
+        write!(
+            f,
+            "{} → {}",
+            self.label(),
+            self.credentials_path().display()
+        )
     }
 }
 

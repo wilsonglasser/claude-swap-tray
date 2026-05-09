@@ -75,8 +75,14 @@ fn extract_window(root: &serde_json::Value, keys: &[&str]) -> Option<UsageWindow
 }
 
 fn window_from_obj(obj: &serde_json::Value) -> Option<UsageWindow> {
-    let used = obj.get("used").or_else(|| obj.get("utilization_used"))?.as_u64()?;
-    let limit = obj.get("limit").or_else(|| obj.get("utilization_limit"))?.as_u64()?;
+    let used = obj
+        .get("used")
+        .or_else(|| obj.get("utilization_used"))?
+        .as_u64()?;
+    let limit = obj
+        .get("limit")
+        .or_else(|| obj.get("utilization_limit"))?
+        .as_u64()?;
     if limit == 0 {
         return None;
     }
@@ -88,5 +94,10 @@ fn window_from_obj(obj: &serde_json::Value) -> Option<UsageWindow> {
         .and_then(|v| v.as_str())
         .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
         .map(|d| d.with_timezone(&Utc));
-    Some(UsageWindow { pct, used, limit, resets_at })
+    Some(UsageWindow {
+        pct,
+        used,
+        limit,
+        resets_at,
+    })
 }

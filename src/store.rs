@@ -35,7 +35,11 @@ fn default_version() -> u32 {
 
 impl Default for Manifest {
     fn default() -> Self {
-        Self { version: 1, active_slot: None, accounts: Vec::new() }
+        Self {
+            version: 1,
+            active_slot: None,
+            accounts: Vec::new(),
+        }
     }
 }
 
@@ -50,7 +54,9 @@ impl Store {
         let data_dir = dirs.data_dir();
         fs::create_dir_all(data_dir)
             .with_context(|| format!("failed to create {}", data_dir.display()))?;
-        Ok(Self { manifest_path: data_dir.join("manifest.json") })
+        Ok(Self {
+            manifest_path: data_dir.join("manifest.json"),
+        })
     }
 
     fn read_manifest(&self) -> Result<Manifest> {
@@ -90,8 +96,7 @@ impl Store {
     /// Allocate a new slot number (lowest unused positive integer).
     pub fn next_slot(&self) -> Result<u32> {
         let m = self.read_manifest()?;
-        let used: std::collections::BTreeSet<u32> =
-            m.accounts.iter().map(|a| a.slot).collect();
+        let used: std::collections::BTreeSet<u32> = m.accounts.iter().map(|a| a.slot).collect();
         Ok((1u32..).find(|s| !used.contains(s)).unwrap())
     }
 

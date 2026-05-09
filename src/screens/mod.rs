@@ -32,9 +32,15 @@ pub fn root_view(app: &App) -> Element<'_, Message> {
         Screen::AddAccount => add_account::view(app),
         Screen::Settings => settings::view(app),
     };
-    column![nav, container(body).padding(24).width(iced::Length::Fill).height(iced::Length::Fill)]
-        .spacing(0)
-        .into()
+    column![
+        nav,
+        container(body)
+            .padding(24)
+            .width(iced::Length::Fill)
+            .height(iced::Length::Fill)
+    ]
+    .spacing(0)
+    .into()
 }
 
 fn nav_bar(active: Screen) -> Element<'static, Message> {
