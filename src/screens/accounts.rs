@@ -72,7 +72,10 @@ pub fn view(app: &App) -> Element<'_, Message> {
                 text("Log into Claude Code, then add the account here.")
                     .size(14)
                     .style(|t: &iced::Theme| text::Style {
-                        color: Some(t.extended_palette().background.weak.color),
+                        color: Some(iced::Color {
+                            a: 0.65,
+                            ..t.extended_palette().background.base.text
+                        }),
                     }),
                 Space::new().height(20),
                 button(text("Add account"))
@@ -109,31 +112,37 @@ pub fn view(app: &App) -> Element<'_, Message> {
 }
 
 fn account_row(acct: &Account, is_active: bool) -> Element<'_, Message> {
-    let marker = if is_active { "●" } else { " " };
+    let org_label = if acct.organization_name.is_empty() {
+        "personal".to_string()
+    } else {
+        acct.organization_name.clone()
+    };
+
+    let identity = column![
+        text(acct.email.clone()).size(15),
+        text(org_label).size(12).style(muted_text),
+    ]
+    .spacing(2);
+
+    let action: Element<'_, Message> = if is_active {
+        text("● Active")
+            .size(13)
+            .style(|t: &iced::Theme| text::Style {
+                color: Some(t.extended_palette().success.base.color),
+            })
+            .into()
+    } else {
+        button(text("Switch"))
+            .on_press(Message::Accounts(Msg::SwitchTo(acct.slot)))
+            .style(button::primary)
+            .into()
+    };
+
     container(
         row![
-            text(marker).size(20),
-            column![
-                text(acct.email.clone()).size(15),
-                text(if acct.organization_name.is_empty() {
-                    "personal".to_string()
-                } else {
-                    acct.organization_name.clone()
-                })
-                .size(12)
-                .style(|t: &iced::Theme| text::Style {
-                    color: Some(t.extended_palette().background.weak.color),
-                }),
-            ]
-            .spacing(2),
+            identity,
             Space::new().width(Length::Fill),
-            button(text(if is_active { "Active" } else { "Switch" }))
-                .on_press(Message::Accounts(Msg::SwitchTo(acct.slot)))
-                .style(if is_active {
-                    button::success
-                } else {
-                    button::primary
-                }),
+            action,
             button(text("Remove"))
                 .on_press(Message::Accounts(Msg::Remove(acct.slot)))
                 .style(button::danger),
@@ -142,8 +151,37 @@ fn account_row(acct: &Account, is_active: bool) -> Element<'_, Message> {
         .spacing(12)
         .padding(12),
     )
-    .style(container::bordered_box)
+    .style(if is_active {
+        active_row_style
+    } else {
+        container::bordered_box
+    })
     .into()
+}
+
+fn active_row_style(theme: &iced::Theme) -> container::Style {
+    let palette = theme.extended_palette();
+    container::Style {
+        background: Some(iced::Background::Color(palette.success.weak.color)),
+        text_color: Some(palette.success.weak.text),
+        border: iced::Border {
+            color: palette.success.strong.color,
+            width: 1.0,
+            radius: 6.0.into(),
+        },
+        ..container::Style::default()
+    }
+}
+
+/// Mid-gray that's readable on both Dark and Light themes. Replaces
+/// `extended_palette().background.weak.color` (which is a divider tone
+/// — too washed-out for body text on dark bg).
+fn muted_text(theme: &iced::Theme) -> text::Style {
+    let palette = theme.extended_palette();
+    let base = palette.background.base.text;
+    text::Style {
+        color: Some(iced::Color { a: 0.65, ..base }),
+    }
 }
 
 fn locations_summary(locations: &[Location]) -> Element<'_, Message> {
@@ -151,7 +189,7 @@ fn locations_summary(locations: &[Location]) -> Element<'_, Message> {
         return text("No Claude Code installations detected.")
             .size(13)
             .style(|t: &iced::Theme| text::Style {
-                color: Some(t.extended_palette().danger.weak.color),
+                color: Some(t.extended_palette().danger.base.color),
             })
             .into();
     }
@@ -162,8 +200,6 @@ fn locations_summary(locations: &[Location]) -> Element<'_, Message> {
         .join(", ");
     text(format!("{} location(s): {labels}", locations.len()))
         .size(13)
-        .style(|t: &iced::Theme| text::Style {
-            color: Some(t.extended_palette().background.weak.color),
-        })
+        .style(muted_text)
         .into()
 }

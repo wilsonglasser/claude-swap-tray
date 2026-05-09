@@ -126,7 +126,10 @@ fn field<'a>(label: &'a str, help: &'a str, control: Element<'a, Message>) -> El
     column![
         text(label).size(15),
         text(help).size(12).style(|t: &iced::Theme| text::Style {
-            color: Some(t.extended_palette().background.weak.color),
+            color: Some(iced::Color {
+                a: 0.65,
+                ..t.extended_palette().background.base.text
+            }),
         }),
         Space::new().height(6),
         control,

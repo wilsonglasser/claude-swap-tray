@@ -61,7 +61,7 @@ impl App {
     }
 
     fn title(&self) -> String {
-        format!("claude-swap-tray — {}", self.screen.label())
+        "Claude Swap Tray".to_string()
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -78,6 +78,8 @@ impl App {
                 self.locations = locs;
                 self.accounts = accts;
                 self.active_slot = active;
+                #[cfg(target_os = "windows")]
+                sync_tray_menu(self);
                 Task::none()
             }
             Message::LocationsRefreshed(locs) => {
@@ -86,13 +88,15 @@ impl App {
             }
             Message::AccountsRefreshed(accts) => {
                 self.accounts = accts;
+                #[cfg(target_os = "windows")]
+                sync_tray_menu(self);
                 Task::none()
             }
             Message::WindowCloseRequested(id) => window::set_mode(id, window::Mode::Hidden),
             #[cfg(target_os = "windows")]
             Message::MonitorEvent(ev) => handle_monitor_event(self, ev),
             #[cfg(target_os = "windows")]
-            Message::TrayAction(action) => handle_tray_action(action),
+            Message::TrayAction(action) => handle_tray_action(self, action),
             Message::AddAccount(msg) => add_account::update(self, msg),
             Message::Accounts(msg) => accounts::update(self, msg),
             Message::Settings(msg) => settings::update(self, msg),
@@ -136,11 +140,12 @@ fn handle_monitor_event(app: &mut App, ev: crate::monitor::MonitorEvent) -> Task
             app.usage_pct = Some(pct);
         }
     }
+    sync_tray_menu(app);
     Task::none()
 }
 
 #[cfg(target_os = "windows")]
-fn handle_tray_action(action: crate::tray::TrayAction) -> Task<Message> {
+fn handle_tray_action(app: &App, action: crate::tray::TrayAction) -> Task<Message> {
     use crate::tray::TrayAction;
     match action {
         TrayAction::ShowWindow => window::oldest().then(|opt| match opt {
@@ -154,8 +159,49 @@ fn handle_tray_action(action: crate::tray::TrayAction) -> Task<Message> {
             Some(id) => window::set_mode(id, window::Mode::Hidden),
             None => Task::none(),
         }),
+        TrayAction::SwitchTo(slot) => {
+            let locations = app.locations.clone();
+            Task::perform(
+                async move {
+                    crate::switcher::switch_to(slot, &locations)
+                        .await
+                        .map(|_| slot)
+                        .map_err(|e| e.to_string())
+                },
+                |res| Message::Accounts(accounts::Msg::SwitchCompleted(res)),
+            )
+        }
+        TrayAction::RefreshUsage => {
+            // The monitor subscription will pick up the new threshold/poll
+            // settings on its next tick automatically. For an immediate
+            // poke, just emit a Tick to refresh accounts/locations now.
+            Task::done(Message::Tick)
+        }
         TrayAction::Quit => iced::exit(),
     }
+}
+
+#[cfg(target_os = "windows")]
+fn sync_tray_menu(app: &App) {
+    use crate::tray::{MenuAccount, MenuModel};
+    let model = MenuModel {
+        accounts: app
+            .accounts
+            .iter()
+            .map(|a| MenuAccount {
+                slot: a.slot,
+                email: a.email.clone(),
+                usage_pct: if Some(a.slot) == app.active_slot {
+                    app.usage_pct
+                } else {
+                    None
+                },
+            })
+            .collect(),
+        active_slot: app.active_slot,
+        usage_pct: app.usage_pct,
+    };
+    crate::tray::push_menu(model);
 }
 
 #[cfg(target_os = "windows")]
@@ -188,10 +234,29 @@ pub fn run() -> Result<()> {
         .title(App::title)
         .subscription(App::subscription)
         .theme(App::theme)
-        .window_size((900.0, 600.0))
         .exit_on_close_request(false)
+        .window(window_settings())
         .run()
         .map_err(|e| anyhow::anyhow!("iced runtime error: {e}"))
+}
+
+fn window_settings() -> iced::window::Settings {
+    iced::window::Settings {
+        size: iced::Size::new(900.0, 600.0),
+        icon: build_window_icon(),
+        ..Default::default()
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn build_window_icon() -> Option<iced::window::Icon> {
+    let (rgba, w, h) = crate::tray::build_default_icon_rgba();
+    iced::window::icon::from_rgba(rgba, w, h).ok()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn build_window_icon() -> Option<iced::window::Icon> {
+    None
 }
 
 async fn load_locations() -> Vec<Location> {

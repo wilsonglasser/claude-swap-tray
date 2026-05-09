@@ -112,7 +112,10 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let status_widget: Element<'_, Message> = match &app.add_state.status {
         LoginStatus::Idle => text("Click \"Start login\" to launch `claude login` on Windows.")
             .style(|t: &iced::Theme| text::Style {
-                color: Some(t.extended_palette().background.weak.color),
+                color: Some(iced::Color {
+                    a: 0.65,
+                    ..t.extended_palette().background.base.text
+                }),
             })
             .into(),
         LoginStatus::Running(msg) => row![text("⟳"), text(msg.clone())].spacing(8).into(),
@@ -156,7 +159,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             text("Login runs on the Windows-side `claude` CLI. After the OAuth flow completes the credentials are copied into every detected WSL distro automatically.")
                 .size(13)
                 .style(|t: &iced::Theme| text::Style {
-                    color: Some(t.extended_palette().background.weak.color),
+                    color: Some(iced::Color { a: 0.65, ..t.extended_palette().background.base.text }),
                 }),
             Space::new().height(20),
             summary,

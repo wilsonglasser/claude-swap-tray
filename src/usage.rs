@@ -1,9 +1,10 @@
 //! Anthropic usage API client.
 //!
 //! `GET https://api.anthropic.com/api/oauth/usage` with bearer access token.
-//! Response carries 5-hour and 7-day windows with used/limit + reset time.
-//! Field shape is undocumented; we deserialize loosely and tolerate missing
-//! windows.
+//! Response shape (verified against cswap source): each window object
+//! carries a `utilization` percentage (0–100) and a `resets_at` ISO 8601
+//! timestamp. The endpoint may omit one or both windows depending on
+//! account state; missing windows are treated as 0%.
 
 use crate::account::OAuthCredentials;
 use anyhow::{Context, Result};
@@ -15,8 +16,6 @@ const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageWindow {
     pub pct: f64,
-    pub used: u64,
-    pub limit: u64,
     pub resets_at: Option<DateTime<Utc>>,
 }
 
@@ -53,51 +52,20 @@ pub async fn fetch(creds: &OAuthCredentials) -> Result<UsageReport> {
     Ok(parse(&raw))
 }
 
-/// Parse the usage payload. The endpoint shape varies; we look for any
-/// nested object with `used`/`limit`/`resets_at` keys under common
-/// container names (`five_hour_window`, `5h`, `seven_day_window`, `7d`).
 fn parse(raw: &serde_json::Value) -> UsageReport {
     UsageReport {
-        five_hour: extract_window(raw, &["five_hour", "five_hour_window", "5h", "fiveHour"]),
-        seven_day: extract_window(raw, &["seven_day", "seven_day_window", "7d", "sevenDay"]),
+        five_hour: window_from(raw.get("five_hour")),
+        seven_day: window_from(raw.get("seven_day")),
     }
 }
 
-fn extract_window(root: &serde_json::Value, keys: &[&str]) -> Option<UsageWindow> {
-    for k in keys {
-        if let Some(obj) = root.get(*k) {
-            if let Some(w) = window_from_obj(obj) {
-                return Some(w);
-            }
-        }
-    }
-    None
-}
-
-fn window_from_obj(obj: &serde_json::Value) -> Option<UsageWindow> {
-    let used = obj
-        .get("used")
-        .or_else(|| obj.get("utilization_used"))?
-        .as_u64()?;
-    let limit = obj
-        .get("limit")
-        .or_else(|| obj.get("utilization_limit"))?
-        .as_u64()?;
-    if limit == 0 {
-        return None;
-    }
-    let pct = (used as f64 / limit as f64) * 100.0;
+fn window_from(obj: Option<&serde_json::Value>) -> Option<UsageWindow> {
+    let obj = obj?;
+    let pct = obj.get("utilization")?.as_f64()?;
     let resets_at = obj
         .get("resets_at")
-        .or_else(|| obj.get("reset_at"))
-        .or_else(|| obj.get("resetsAt"))
         .and_then(|v| v.as_str())
         .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
         .map(|d| d.with_timezone(&Utc));
-    Some(UsageWindow {
-        pct,
-        used,
-        limit,
-        resets_at,
-    })
+    Some(UsageWindow { pct, resets_at })
 }
