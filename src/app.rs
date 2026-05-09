@@ -156,13 +156,21 @@ fn monitor_subscription() -> Subscription<crate::monitor::MonitorEvent> {
     use iced::stream;
     Subscription::run(|| {
         stream::channel(16, |mut output| async move {
+            // Single Monitor instance for the lifetime of the subscription —
+            // preserves the anti-spam state (which slots already alerted)
+            // across ticks. Settings are reloaded each tick so threshold /
+            // interval changes are picked up without resubscribe.
+            let mon = crate::monitor::Monitor::new(crate::config::Settings::load());
             loop {
                 let settings = crate::config::Settings::load();
-                let mon = crate::monitor::Monitor::new(settings);
+                mon.set_settings(settings.clone());
                 if let Some(ev) = mon.poll_once().await {
                     let _ = iced::futures::SinkExt::send(&mut output, ev).await;
                 }
-                tokio::time::sleep(mon.poll_interval()).await;
+                tokio::time::sleep(std::time::Duration::from_secs(
+                    settings.poll_interval_seconds.max(15),
+                ))
+                .await;
             }
         })
     })

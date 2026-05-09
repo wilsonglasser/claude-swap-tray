@@ -36,16 +36,26 @@ struct AlertState {
 }
 
 pub struct Monitor {
-    settings: Settings,
+    settings: Mutex<Settings>,
     state: Arc<Mutex<AlertState>>,
 }
 
 impl Monitor {
     pub fn new(settings: Settings) -> Self {
         Self {
-            settings,
+            settings: Mutex::new(settings),
             state: Arc::new(Mutex::new(AlertState::default())),
         }
+    }
+
+    pub fn set_settings(&self, settings: Settings) {
+        if let Ok(mut g) = self.settings.try_lock() {
+            *g = settings;
+        }
+    }
+
+    async fn threshold(&self) -> f64 {
+        self.settings.lock().await.threshold_percent
     }
 
     /// Run a single poll cycle. Returns the event to emit, if any.
@@ -82,7 +92,8 @@ impl Monitor {
         }
         let report = usage::fetch(&creds).await?;
         let pct = report.worst_pct();
-        if pct >= self.settings.threshold_percent {
+        let threshold = self.threshold().await;
+        if pct >= threshold {
             let mut st = self.state.lock().await;
             let now = chrono::Utc::now().timestamp();
             let suppressed = st
@@ -102,7 +113,7 @@ impl Monitor {
         Ok(Some(MonitorEvent::UsageUpdated { slot, pct }))
     }
 
-    pub fn poll_interval(&self) -> Duration {
-        Duration::from_secs(self.settings.poll_interval_seconds.max(15))
+    pub async fn poll_interval(&self) -> Duration {
+        Duration::from_secs(self.settings.lock().await.poll_interval_seconds.max(15))
     }
 }
