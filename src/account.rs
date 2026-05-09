@@ -30,6 +30,10 @@ impl Account {
 ///
 /// Mirrors the `claudeAiOauth` block of Claude Code's `.credentials.json`,
 /// in camelCase for round-trip compatibility when we write the file back.
+///
+/// `extra` captures any additional fields Anthropic adds — verified samples
+/// in 2026-05 carry `subscriptionType` and `rateLimitTier` here, and we
+/// preserve them on serialize so replicated files match the source.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OAuthCredentials {
@@ -39,6 +43,8 @@ pub struct OAuthCredentials {
     pub expires_at: i64,
     #[serde(default)]
     pub scopes: Vec<String>,
+    #[serde(flatten, default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 impl OAuthCredentials {

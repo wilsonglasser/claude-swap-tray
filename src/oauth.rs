@@ -72,5 +72,6 @@ pub async fn refresh(creds: &OAuthCredentials) -> Result<OAuthCredentials> {
         refresh_token: parsed.refresh_token.unwrap_or_else(|| creds.refresh_token.clone()),
         expires_at: now_ms + parsed.expires_in.saturating_mul(1000),
         scopes,
+        extra: creds.extra.clone(),
     })
 }
